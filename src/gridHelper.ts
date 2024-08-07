@@ -1,4 +1,4 @@
-import { BufferGeometry, Color, Float32BufferAttribute, LineBasicMaterial, LineSegments } from 'three';
+import { BufferGeometry, Color, Float32BufferAttribute, LineDashedMaterial, LineSegments } from 'three';
 
 class GridHelper extends LineSegments {
   constructor(
@@ -68,7 +68,12 @@ class GridHelper extends LineSegments {
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new Float32BufferAttribute(vertices, 3));
     geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
-    const material = new LineBasicMaterial({ vertexColors: true, toneMapped: false });
+    const material = new LineDashedMaterial({
+      vertexColors: true,
+      toneMapped: false,
+      dashSize: 5,
+      gapSize: 5
+    });
 
     super(geometry, material);
 

@@ -106,7 +106,7 @@ export function LineBox(
 
   const lineSegments = new LineSegments(
     geometryBox,
-    new LineDashedMaterial({ color: new Color(color), dashSize: 3, gapSize: 1 })
+    new LineDashedMaterial({ color: new Color(color), dashSize: 5, gapSize: 5 })
   );
   lineSegments.computeLineDistances();
 

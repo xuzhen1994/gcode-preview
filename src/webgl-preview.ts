@@ -264,7 +264,7 @@ export class WebGLPreview {
       });
     }
 
-    this.camera = new PerspectiveCamera(25, this.canvas.offsetWidth / this.canvas.offsetHeight, 10, 5000);
+    this.camera = new PerspectiveCamera(25, this.canvas.offsetWidth / this.canvas.offsetHeight, 1, 50000);
     this.camera.position.fromArray(this.initialCameraPosition);
     const fogFar = (this.camera as PerspectiveCamera).far;
     const fogNear = fogFar * 0.8;
@@ -687,9 +687,14 @@ export class WebGLPreview {
   drawBuildVolume(): void {
     if (!this.buildVolume) return;
 
-    this.scene.add(
-      new GridHelper(this.buildVolume.x, this.buildVolume.x / 10, this.buildVolume.y, this.buildVolume.y / 10)
+    const gridHelper = new GridHelper(
+      this.buildVolume.x,
+      this.buildVolume.x / 10,
+      this.buildVolume.y,
+      this.buildVolume.y / 10
     );
+    gridHelper.computeLineDistances();
+    this.scene.add(gridHelper);
 
     const geometryBox = LineBox(this.buildVolume.x, this.buildVolume.z, this.buildVolume.y, 0x888888);
 
