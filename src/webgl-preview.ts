@@ -25,8 +25,10 @@ import {
   MeshLambertMaterial,
   PerspectiveCamera,
   PointLight,
+  Raycaster,
   REVISION,
   Scene,
+  Vector2,
   Vector3,
   WebGLRenderer
 } from 'three';
@@ -71,6 +73,12 @@ export class State {
     Object.assign(state, { x: 0, y: 0, z: 0, r: 0, e: 0, i: 0, j: 0, t: 0, f: 20000 });
     return state;
   }
+
+  static initialByStartPoint(x: number, y: number, z: number): State {
+    const state = new State();
+    Object.assign(state, { x: x, y: y, z: z, r: 0, e: 0, i: 0, j: 0, t: 0, f: 20000 });
+    return state;
+  }
 }
 
 export type GCodePreviewOptions = {
@@ -89,6 +97,7 @@ export type GCodePreviewOptions = {
   renderExtrusion?: boolean;
   renderTravel?: boolean;
   startLayer?: number;
+  startPoint?: State;
   topLayerColor?: ColorRepresentation;
   travelColor?: ColorRepresentation | ColorRepresentation[];
   toolColors?: Record<number, ColorRepresentation>;
@@ -137,6 +146,7 @@ export class WebGLPreview {
   startLayer?: number;
   endLayer?: number;
   singleLayerMode = false;
+  startPoint?: State;
   buildVolume?: BuildVolume;
   initialCameraPosition = [-100, 400, 450];
   /**
@@ -199,6 +209,7 @@ export class WebGLPreview {
     this.startLayer = opts.startLayer;
     this.lineWidth = opts.lineWidth;
     this.lineHeight = opts.lineHeight;
+    this.startPoint = opts.startPoint;
     this.buildVolume = opts.buildVolume;
     this.initialCameraPosition = opts.initialCameraPosition ?? this.initialCameraPosition;
     this.debug = opts.debug ?? this.debug;
@@ -252,7 +263,7 @@ export class WebGLPreview {
       const container = document.getElementById(this.targetId);
       if (!container) throw new Error('Unable to find element ' + this.targetId);
 
-      this.renderer = new WebGLRenderer({ preserveDrawingBuffer: true });
+      this.renderer = new WebGLRenderer({ preserveDrawingBuffer: false, depth: false });
       this.canvas = this.renderer.domElement;
 
       container.appendChild(this.canvas);
@@ -260,7 +271,8 @@ export class WebGLPreview {
       this.canvas = opts.canvas;
       this.renderer = new WebGLRenderer({
         canvas: this.canvas,
-        preserveDrawingBuffer: true
+        preserveDrawingBuffer: false,
+        depth: false
       });
     }
 
@@ -388,6 +400,15 @@ export class WebGLPreview {
     this._actualTravelDuration[layerIdx] = 0;
   }
 
+  get initState(): State {
+    if (this.startPoint) {
+      const { x, y, z } = this.startPoint;
+      return State.initialByStartPoint(x, y, z);
+    } else {
+      return State.initial;
+    }
+  }
+
   /**
    * @internal Do not use externally.
    */
@@ -465,7 +486,7 @@ export class WebGLPreview {
   render(): void {
     const startRender = performance.now();
     this.group = this.createGroup('allLayers');
-    this.state = State.initial;
+    this.state = this.initState;
     this.initScene();
 
     for (let index = 0; index < this.layers.length; index++) {
@@ -478,6 +499,42 @@ export class WebGLPreview {
     this.renderer.render(this.scene, this.camera);
     this._lastRenderTime = performance.now() - startRender;
   }
+
+  // handleIntersect(scene: Scene, camera: any, canvasInfo: any) {
+  //   const raycaster = new Raycaster();
+  //   raycaster.params.Line2 = { threshold: 5 };
+  //   const mouse = new Vector2();
+  //   const gcodeObjs = scene.children.filter((obj) => obj.type === 'Line2');
+
+  //   const material_basic = new LineMaterial({ color: 'red', linewidth: 8 });
+  //   material_basic.worldUnits = true;
+  //   material_basic.resolution.set(window.innerWidth, window.innerHeight);
+  //   const material_hover = new LineMaterial({ color: 'green', linewidth: 8 });
+  //   material_hover.worldUnits = true;
+  //   material_hover.resolution.set(window.innerWidth, window.innerHeight);
+
+  //   let lastIntersection;
+  //   let { canvas, canvasWidth, canvasHeight } = canvasInfo;
+  //   canvas.addEventListener('pointermove', (event) => {
+  //     if (lastIntersection) {
+  //       lastIntersection.object.material = material_basic;
+  //       lastIntersection = undefined;
+  //     }
+
+  //     mouse.x = (event.clientX / canvasWidth) * 2 - 1;
+  //     mouse.y = (event.clientY / canvasHeight) * 2 + 1;
+
+  //     raycaster.setFromCamera(mouse, camera);
+
+  //     const intersects = raycaster.intersectObjects(gcodeObjs, false);
+  //     const intersect = intersects[0];
+  //     if (!intersect) {
+  //       return;
+  //     }
+  //     intersect.object.material = material_hover;
+  //     lastIntersection = intersect;
+  //   });
+  // }
 
   // create a new render method to use an animation loop to render the layers incrementally
   /** @experimental */
@@ -715,7 +772,7 @@ export class WebGLPreview {
     this.singleLayerMode = false;
 
     this.beyondFirstMove = false;
-    this.state = State.initial;
+    this.state = this.initState;
     this.devGui?.reset();
     this._geometries = {};
   }
@@ -903,7 +960,9 @@ export class WebGLPreview {
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
     this.controls.dispose();
+    this.controls = null;
     this.renderer.dispose();
+    this.renderer = null;
 
     this.cancelAnimation();
   }
