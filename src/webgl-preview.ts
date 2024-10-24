@@ -1,10 +1,13 @@
 import { Parser, MoveCommand, Layer, SelectToolCommand } from './gcode-parser';
+import { GridHelper } from './gridHelper';
+import { LineBox } from './lineBox';
+
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2';
-import { GridHelper } from './gridHelper';
-import { LineBox } from './lineBox';
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry';
 import Stats from 'three/examples/jsm/libs/stats.module';
 
 import { DevGUI, DevModeOptions } from './dev-gui';
@@ -16,14 +19,18 @@ import {
   BufferGeometry,
   Color,
   ColorRepresentation,
+  DoubleSide,
   Euler,
   Float32BufferAttribute,
   Fog,
   Group,
   LineBasicMaterial,
   LineSegments,
+  Mesh,
   MeshLambertMaterial,
+  MeshBasicMaterial,
   PerspectiveCamera,
+  PlaneGeometry,
   PointLight,
   Raycaster,
   REVISION,
@@ -188,6 +195,9 @@ export class WebGLPreview {
   private _airTravelDuration?: number[] = [];
   private _actualTravelDuration?: number[] = [];
 
+  // label drawing
+  private labelCount = 0;
+
   // debug
   private devMode?: boolean | DevModeOptions = false;
   private _lastRenderTime = 0;
@@ -263,7 +273,7 @@ export class WebGLPreview {
       const container = document.getElementById(this.targetId);
       if (!container) throw new Error('Unable to find element ' + this.targetId);
 
-      this.renderer = new WebGLRenderer({ preserveDrawingBuffer: false, depth: false });
+      this.renderer = new WebGLRenderer({ preserveDrawingBuffer: false, depth: false, antialias: true, alpha: true });
       this.canvas = this.renderer.domElement;
 
       container.appendChild(this.canvas);
@@ -272,7 +282,9 @@ export class WebGLPreview {
       this.renderer = new WebGLRenderer({
         canvas: this.canvas,
         preserveDrawingBuffer: false,
-        depth: false
+        depth: false,
+        antialias: true,
+        alpha: true
       });
     }
 
@@ -604,6 +616,11 @@ export class WebGLPreview {
         continue;
       }
 
+      if (cmd.gcode == 'm101') {
+        this.labelCount++;
+        this.addRectangle(this.state, 0xd2d2d2, this.labelCount + '', 0x2d2d2d);
+      }
+
       if (['g0', 'g00', 'g1', 'g01', 'g2', 'g02', 'g3', 'g03'].indexOf(cmd.gcode) > -1) {
         const g = cmd as MoveCommand;
         const next: State = {
@@ -649,6 +666,7 @@ export class WebGLPreview {
     }
 
     this.doRenderExtrusion(currentLayer, index);
+    this.labelCount = 0;
   }
 
   /** @internal */
@@ -954,6 +972,48 @@ export class WebGLPreview {
     const line = new LineSegments2(geometry, matLine);
 
     this.group?.add(line);
+  }
+
+  /** @internal */
+  addRectangle(state: State, backgroundColor: number, text: string, textColor: number): void {
+    if (!state) return;
+
+    const movedown = state.z > 0;
+    if (movedown) {
+      this.addLine([state.x, state.y, state.z, state.x, state.y, 0], new Color('green').getHex());
+    }
+
+    const geometry = new PlaneGeometry(100, 50);
+    const material = new MeshBasicMaterial({ color: backgroundColor, side: DoubleSide, precision: 'highp' });
+    const plane = new Mesh(geometry, material);
+    plane.position.set(state.x, state.y, 0);
+
+    const loader = new FontLoader();
+    loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+      const textGeometry = new TextGeometry(text, {
+        font: font,
+        size: 36,
+        height: 0.1,
+        bevelEnabled: true,
+        bevelThickness: 0.02,
+        bevelSize: 0.02,
+        bevelOffset: 0,
+        bevelSegments: 3
+      });
+      const textMaterial = new MeshBasicMaterial({ color: textColor, side: DoubleSide });
+      const textMesh = new Mesh(textGeometry, textMaterial);
+
+      textGeometry.computeBoundingBox();
+      textMesh.position.x = -textGeometry.boundingBox.max.x * 0.5;
+      textMesh.position.y = -textGeometry.boundingBox.max.y * 0.5;
+      textMesh.position.z = 0.01;
+      plane.add(textMesh);
+    });
+    this.group?.add(plane);
+
+    if (movedown) {
+      this.addLine([state.x, state.y, 0, state.x, state.y, state.z], new Color('green').getHex());
+    }
   }
 
   dispose(): void {
