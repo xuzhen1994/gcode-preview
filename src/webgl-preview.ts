@@ -964,12 +964,16 @@ export class WebGLPreview {
 
     const matLine = new LineMaterial({
       color: color,
-      linewidth: this.lineWidth / (1000 * window.devicePixelRatio)
+      linewidth: this.lineWidth
+      // linewidth: this.lineWidth / (1000 * window.devicePixelRatio)
     });
+    matLine.worldUnits = true;
+    matLine.resolution.set(window.innerWidth, window.innerHeight);
     this.disposables.push(matLine);
 
     geometry.setPositions(vertices);
     const line = new LineSegments2(geometry, matLine);
+    line.computeLineDistances();
 
     this.group?.add(line);
   }
