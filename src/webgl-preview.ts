@@ -37,7 +37,9 @@ import {
   Scene,
   Vector2,
   Vector3,
-  WebGLRenderer
+  WebGLRenderer,
+  Object3D,
+  TypedArray
 } from 'three';
 
 import { ExtrusionGeometry } from './extrusion-geometry';
@@ -158,6 +160,7 @@ export class WebGLPreview {
   inches = false;
   nonTravelmoves: string[] = [];
   disableGradient = false;
+  private tooltipEl?: HTMLDivElement;
 
   isActualCutting: IsActualCutting;
 
@@ -298,6 +301,124 @@ export class WebGLPreview {
     if (opts.allowDragNDrop) this._enableDropHandler();
 
     this.initStats();
+    this.initTooltip();
+    this.handleIntersect();
+  }
+
+  /**
+   * 初始化tooltip DOM元素
+   */
+  private initTooltip() {
+    if (this.tooltipEl) return;
+    const tooltip = document.createElement('div');
+    tooltip.style.position = 'fixed';
+    tooltip.style.pointerEvents = 'none';
+    tooltip.style.background = 'rgba(120,120,120,0.9)';
+    tooltip.style.color = '#fff';
+    tooltip.style.padding = '4px 8px';
+    tooltip.style.borderRadius = '4px';
+    tooltip.style.fontSize = '12px';
+    tooltip.style.zIndex = '9999';
+    tooltip.style.display = 'none';
+    document.body.appendChild(tooltip);
+    this.tooltipEl = tooltip;
+  }
+
+  /**
+   * 递归收集所有LineSegments2对象（仅name为'travel'的travel线）
+   */
+  private collectPickableLines(obj: Object3D): LineSegments2[] {
+    let result: LineSegments2[] = [];
+    if (obj.type === 'LineSegments2' && obj.name === 'travel') {
+      result.push(obj as LineSegments2);
+    }
+    if ('children' in obj && Array.isArray((obj as Object3D).children)) {
+      for (const child of (obj as Object3D).children) {
+        result = result.concat(this.collectPickableLines(child));
+      }
+    }
+    return result;
+  }
+
+  /**
+   * 监听canvas鼠标事件，实现射线拾取与tooltip显示
+   */
+  private handleIntersect() {
+    if (!this.canvas || !this.tooltipEl) return;
+    const raycaster = new Raycaster();
+    raycaster.params.Line2 = { threshold: 0.01 };
+    const mouse = new Vector2();
+    let lastIntersection: LineSegments2 | null = null;
+    let lastMaterial: LineMaterial | null = null;
+    const canvas = this.canvas;
+    const tooltip = this.tooltipEl;
+    // 监听鼠标移动
+    canvas.addEventListener('pointermove', (event) => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, this.camera);
+      // 递归收集所有可拾取线条
+      const gcodeObjs = this.collectPickableLines(this.scene);
+      const intersects = raycaster.intersectObjects(gcodeObjs, false);
+      if (lastIntersection) {
+        // 恢复上一个高亮
+        if (lastMaterial) (lastIntersection as LineSegments2).material = lastMaterial;
+        lastIntersection = null;
+        lastMaterial = null;
+        tooltip.style.display = 'none';
+      }
+      if (intersects.length > 0) {
+        const intersect = intersects[0];
+        const lineObj = intersect.object as LineSegments2;
+        lastIntersection = lineObj;
+        lastMaterial = lineObj.material as LineMaterial;
+        const highlightMat = lastMaterial.clone();
+        highlightMat.color.set('red');
+        (lineObj.material as LineMaterial) = highlightMat;
+        // console.log(`lineObj: `, lineObj);
+        const posArray = (lineObj.geometry as LineSegmentsGeometry).getAttribute('instanceStart').array;
+        // 显示整条线的首尾点坐标
+        if (posArray && posArray.length >= 6) {
+          const start = [posArray[0], posArray[1], posArray[2]];
+          const arrLen = posArray.length;
+          const end = [posArray[arrLen - 3], posArray[arrLen - 2], posArray[arrLen - 1]];
+          const distance = this.calcDistance(posArray);
+          tooltip.innerText = `类型: ${arrLen > 6 ? '圆弧' : '线段'}\n起点: ( ${start.map((n) => n.toFixed(1)).join(', ')} )\n终点: ( ${end.map((n) => n.toFixed(1)).join(', ')} )\n长度: ${distance.toFixed(1)} mm`;
+          tooltip.style.left = event.clientX + 12 + 'px';
+          tooltip.style.top = event.clientY + 12 + 'px';
+          tooltip.style.display = 'block';
+        } else {
+          tooltip.style.display = 'none';
+        }
+      }
+    });
+    canvas.addEventListener('pointerleave', () => {
+      if (lastIntersection && lastMaterial) {
+        (lastIntersection as LineSegments2).material = lastMaterial;
+        lastIntersection = null;
+        lastMaterial = null;
+      }
+      if (tooltip) tooltip.style.display = 'none';
+    });
+  }
+
+  private calcDistance(posArr: TypedArray): number {
+    const length = posArr.length;
+    if (!length || length % 3 !== 0) {
+      return -1;
+    }
+    let distance = 0;
+    for (let i = 3; i < length; i += 3) {
+      const x1 = posArr[i - 3],
+        y1 = posArr[i - 2],
+        z1 = posArr[i - 1];
+      const x2 = posArr[i],
+        y2 = posArr[i + 1],
+        z2 = posArr[i + 2];
+      distance += Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2) + Math.pow(z2 - z1, 2));
+    }
+    return distance;
   }
 
   get extrusionColor(): Color | Color[] {
@@ -496,42 +617,6 @@ export class WebGLPreview {
     this.renderer.render(this.scene, this.camera);
     this._lastRenderTime = performance.now() - startRender;
   }
-
-  // handleIntersect(scene: Scene, camera: any, canvasInfo: any) {
-  //   const raycaster = new Raycaster();
-  //   raycaster.params.Line2 = { threshold: 5 };
-  //   const mouse = new Vector2();
-  //   const gcodeObjs = scene.children.filter((obj) => obj.type === 'Line2');
-
-  //   const material_basic = new LineMaterial({ color: 'red', linewidth: 8 });
-  //   material_basic.worldUnits = true;
-  //   material_basic.resolution.set(window.innerWidth, window.innerHeight);
-  //   const material_hover = new LineMaterial({ color: 'green', linewidth: 8 });
-  //   material_hover.worldUnits = true;
-  //   material_hover.resolution.set(window.innerWidth, window.innerHeight);
-
-  //   let lastIntersection;
-  //   let { canvas, canvasWidth, canvasHeight } = canvasInfo;
-  //   canvas.addEventListener('pointermove', (event) => {
-  //     if (lastIntersection) {
-  //       lastIntersection.object.material = material_basic;
-  //       lastIntersection = undefined;
-  //     }
-
-  //     mouse.x = (event.clientX / canvasWidth) * 2 - 1;
-  //     mouse.y = (event.clientY / canvasHeight) * 2 + 1;
-
-  //     raycaster.setFromCamera(mouse, camera);
-
-  //     const intersects = raycaster.intersectObjects(gcodeObjs, false);
-  //     const intersect = intersects[0];
-  //     if (!intersect) {
-  //       return;
-  //     }
-  //     intersect.object.material = material_hover;
-  //     lastIntersection = intersect;
-  //   });
-  // }
 
   // create a new render method to use an animation loop to render the layers incrementally
   /** @experimental */
@@ -961,8 +1046,11 @@ export class WebGLPreview {
 
     geometry.setPositions(vertices);
     const line = new LineSegments2(geometry, matLine);
+    // 标记travel线对象
+    line.name = 'travel';
 
     this.group?.add(line);
+    // console.log('addThickLine vertices:', vertices);
   }
 
   /** @internal */
@@ -1008,13 +1096,32 @@ export class WebGLPreview {
   }
 
   dispose(): void {
+    // 释放 group 及其所有子对象
+    if (this.group) {
+      while (this.group.children.length > 0) {
+        const obj = this.group.children.pop();
+        if (obj) this.group.remove(obj);
+      }
+      if (this.scene.children.includes(this.group)) {
+        this.scene.remove(this.group);
+      }
+      this.group = undefined;
+    }
+    // 释放 scene 其它 children（如buildVolume等）
+    while (this.scene.children.length > 0) {
+      this.scene.remove(this.scene.children[0]);
+    }
+    // 释放其它资源
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
-    this.controls.dispose();
-    this.controls = null;
-    this.renderer.dispose();
-    this.renderer = null;
-
+    if (this.controls) {
+      this.controls.dispose();
+      this.controls = null;
+    }
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer = null;
+    }
     this.cancelAnimation();
   }
 
@@ -1184,7 +1291,6 @@ export class WebGLPreview {
         }
         if (this.renderTravel && tempLayer.travel.length) {
           this.doRenderTravel(tempLayer.travel, this.state, next);
-          this.calcTravelDistanceAndDuration(tempLayer.travel, this.state, next);
         }
         if (this.renderExtrusion && tempLayer.extrusion.length) {
           this.addLine(tempLayer.extrusion, this.currentToolColor.getHex());
@@ -1197,6 +1303,11 @@ export class WebGLPreview {
       this.state.f = next.f;
       if (!this.beyondFirstMove) this.beyondFirstMove = true;
     }
+    // 调试：打印group.children结构
+    // console.log(
+    //   '[appendGCode] group.children:',
+    //   this.group.children.map((obj) => ({ type: obj.type, name: obj.name }))
+    // );
   }
 }
 
